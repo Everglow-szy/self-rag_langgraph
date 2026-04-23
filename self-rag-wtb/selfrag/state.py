@@ -1,7 +1,12 @@
 """State schemas for Self-RAG LangGraph pipelines (WTB-compatible)."""
-from __future__ import annotations
 
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
+
+try:
+    from rag_contracts import GenerationResult, RetrievalResult
+except ImportError:
+    RetrievalResult = Any  # type: ignore[assignment,misc]
+    GenerationResult = Any  # type: ignore[assignment,misc]
 
 
 class IndexState(TypedDict, total=False):
@@ -78,3 +83,29 @@ class LongFormQueryState(TypedDict, total=False):
     final_output: str          # with citations
     output_docs: List[Dict[str, Any]]
     intermediate: Dict[str, Any]
+
+
+class SelfRAGModularState(TypedDict, total=False):
+    """State for the modular Self-RAG pipeline using canonical rag_contracts types.
+
+    This state schema mirrors the LongRAG modular graph, enabling the same
+    ``query_processing -> retrieval -> reranking -> generation`` topology
+    with any canonical component injected via DI.
+    """
+
+    # Canonical inputs
+    query: str
+    query_id: str
+
+    # Stage outputs (canonical types)
+    expanded_queries: List[str]
+    retrieval_results: List[RetrievalResult]
+    generation_result: GenerationResult
+
+    # Self-RAG backward-compat aliases
+    question: str
+    evidences: List[Dict[str, Any]]
+    final_pred: str
+
+    # Error tracking
+    error: Optional[str]

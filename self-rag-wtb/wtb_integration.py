@@ -12,11 +12,14 @@ Usage:
 from functools import partial
 from typing import Optional
 
+from rag_contracts import Generation, Query, Reranking, Retrieval
+
 from selfrag.config import SelfRAGConfig
 from selfrag.constants import load_special_tokens
 from selfrag.graph_query import build_query_graph
 from selfrag.graph_query_longform import build_longform_query_graph
 from selfrag.graph_index import build_index_graph
+from selfrag.modular_pipeline import build_selfrag_modular_state_graph
 from selfrag.store import DocStore, VectorStore
 
 
@@ -119,5 +122,45 @@ def create_selfrag_index_project(
 
     return WorkflowProject(
         name="selfrag_index",
+        graph_factory=graph_factory,
+    )
+
+
+def create_selfrag_modular_project(
+    name: str = "selfrag_modular",
+    *,
+    retrieval: Retrieval,
+    generation: Generation,
+    reranking: Reranking | None = None,
+    query: Query | None = None,
+):
+    """Create a WTB WorkflowProject for the modular Self-RAG pipeline.
+
+    This pipeline uses canonical ``rag_contracts`` components injected via DI,
+    enabling cross-project component swaps (e.g. LongRAG retrieval with
+    Self-RAG generation).
+
+    Args:
+        name: Project name for WTB registration.
+        retrieval: Any ``rag_contracts.Retrieval`` implementation.
+        generation: Any ``rag_contracts.Generation`` implementation.
+        reranking: Optional ``rag_contracts.Reranking``.
+        query: Optional ``rag_contracts.Query``.
+
+    Returns:
+        WorkflowProject ready for bench.register_project().
+    """
+    from wtb.sdk.workflow_project import WorkflowProject
+
+    def graph_factory():
+        return build_selfrag_modular_state_graph(
+            retrieval=retrieval,
+            generation=generation,
+            reranking=reranking,
+            query=query,
+        )
+
+    return WorkflowProject(
+        name=name,
         graph_factory=graph_factory,
     )
