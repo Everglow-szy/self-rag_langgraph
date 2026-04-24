@@ -1,95 +1,110 @@
-"""Self-RAG prompt templates, task instructions, and special tokens.
+"""Self-RAG control tokens, prompt templates, and special token utilities.
 
-Extracted from the original utils.py for standalone import.
+Inlined from the original Self-RAG codebase to avoid external dependency.
+These are the special tokens the Self-RAG model uses for retrieval decisions,
+relevance assessment, grounding verification, and utility scoring.
 """
-import re
+
+from __future__ import annotations
+
+from typing import Any, Dict, Optional, Tuple
+
+# ── Retrieval decision tokens ────────────────────────────────────────────
+
+retrieval_tokens_names = [
+    "[Retrieval]",
+    "[No Retrieval]",
+    "[Continue to Use Evidence]",
+]
+
+# ── Relevance tokens (ISREL) ─────────────────────────────────────────────
+
+rel_tokens_names = [
+    "[Relevant]",
+    "[Irrelevant]",
+]
+
+# ── Grounding tokens (ISSUP) ─────────────────────────────────────────────
+
+ground_tokens_names = [
+    "[Fully supported]",
+    "[Partially supported]",
+    "[No support / Contradictory]",
+]
+
+# ── Utility tokens (ISUSE) ───────────────────────────────────────────────
+
+utility_tokens_names = [
+    "[Utility:1]",
+    "[Utility:2]",
+    "[Utility:3]",
+    "[Utility:4]",
+    "[Utility:5]",
+]
+
+# ── Aggregate list (used by _postprocess to strip tokens from output) ────
+
+control_tokens = (
+    retrieval_tokens_names
+    + rel_tokens_names
+    + ground_tokens_names
+    + utility_tokens_names
+    + ["<paragraph>", "</paragraph>"]
+)
+
+# ── Prompt templates (Self-RAG / Alpaca style) ───────────────────────────
 
 PROMPT_DICT = {
     "prompt_input": (
-        "### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n"
+        "### Instruction:\n{instruction}\n\n"
+        "### Input:\n{input}\n\n"
+        "### Response:\n"
     ),
     "prompt_no_input": (
-        "### Instruction:\n{instruction}\n\n### Response:\n"
-    ),
-    "prompt_no_input_retrieval": (
-        "Below is an instruction that describes a task. "
-        "Write a response that appropriately completes the request.\n\n"
-        "### Paragraph:\n{paragraph}\n\n### Instruction:\n{instruction}\n\n### Response:"
-    ),
-    "prompt_open_instruct": (
-        "<user>\n{instruction}\n"
-        "<assistant>\n"
-    ),
-    "prompt_open_instruct_retrieval": (
-        "<user>\nReference:{paragraph}\n{instruction}\n"
-        "<assistant>\n"
-    ),
-    "llama_chat_prompt": (
-        "[INST]{instruction}[/INST]"
-    ),
-    "llama_chat_prompt_retrieval": (
-        "[INST]{paragraph}\n{instruction}[/INST]"
+        "### Instruction:\n{instruction}\n\n"
+        "### Response:\n"
     ),
 }
 
-TASK_INST = {
-    "wow": "Given a chat history separated by new lines, generates an informative, knowledgeable and engaging response. ",
-    "fever": "Is the following statement correct or not? Say true if it's correct; otherwise say false.",
-    "eli5": "Provide a paragraph-length response using simple words to answer the following question.",
-    "obqa": "Given four answer candidates, A, B, C and D, choose the best answer choice.",
-    "arc_easy": "Given four answer candidates, A, B, C and D, choose the best answer choice.",
-    "arc_c": "Given four answer candidates, A, B, C and D, choose the best answer choice.",
-    "trex": "Given the input format 'Subject Entity [SEP] Relationship Type,' predict the target entity.",
-    "asqa": "Answer the following question. The question may be ambiguous and have multiple correct answers, and in that case, you have to provide a long-form answer including all correct answers.",
-}
 
-rel_tokens_names = ["[Irrelevant]", "[Relevant]"]
-retrieval_tokens_names = ["[No Retrieval]", "[Retrieval]", "[Continue to Use Evidence]"]
-utility_tokens_names = ["[Utility:1]", "[Utility:2]", "[Utility:3]", "[Utility:4]", "[Utility:5]"]
-ground_tokens_names = ["[Fully supported]", "[Partially supported]", "[No support / Contradictory]"]
-other_special_tokens = ["<s>", "</s>", "[PAD]", "<unk>", "<paragraph>", "</paragraph>"]
+# ── Token ID loader ──────────────────────────────────────────────────────
 
-control_tokens = [
-    "[Fully supported]", "[Partially supported]", "[No support / Contradictory]",
-    "[No Retrieval]", "[Retrieval]", "[Irrelevant]", "[Relevant]",
-    "<paragraph>", "</paragraph>",
-    "[Utility:1]", "[Utility:2]", "[Utility:3]", "[Utility:4]", "[Utility:5]",
-]
+def load_special_tokens(
+    tokenizer: Any,
+    use_grounding: bool = True,
+    use_utility: bool = True,
+) -> Tuple[
+    Optional[Dict[str, int]],
+    Dict[str, int],
+    Optional[Dict[str, int]],
+    Optional[Dict[str, int]],
+]:
+    """Map Self-RAG special token names to integer IDs via the tokenizer.
 
+    Returns ``(ret_tokens, rel_tokens, grd_tokens, ut_tokens)`` where each
+    is a ``{token_name: token_id}`` dict (or ``None`` when disabled).
+    """
+    ret_tokens = {
+        t: tokenizer.convert_tokens_to_ids(t)
+        for t in retrieval_tokens_names
+    }
+    rel_tokens = {
+        t: tokenizer.convert_tokens_to_ids(t)
+        for t in rel_tokens_names
+    }
 
-def load_special_tokens(tokenizer, use_grounding=False, use_utility=False):
-    ret_tokens = {token: tokenizer.convert_tokens_to_ids(token)
-                  for token in retrieval_tokens_names}
-    rel_tokens = {}
-    for token in ["[Irrelevant]", "[Relevant]"]:
-        rel_tokens[token] = tokenizer.convert_tokens_to_ids(token)
+    grd_tokens: Optional[Dict[str, int]] = None
+    if use_grounding:
+        grd_tokens = {
+            t: tokenizer.convert_tokens_to_ids(t)
+            for t in ground_tokens_names
+        }
 
-    grd_tokens = None
-    if use_grounding is True:
-        grd_tokens = {}
-        for token in ground_tokens_names:
-            grd_tokens[token] = tokenizer.convert_tokens_to_ids(token)
-
-    ut_tokens = None
-    if use_utility is True:
-        ut_tokens = {}
-        for token in utility_tokens_names:
-            ut_tokens[token] = tokenizer.convert_tokens_to_ids(token)
+    ut_tokens: Optional[Dict[str, int]] = None
+    if use_utility:
+        ut_tokens = {
+            t: tokenizer.convert_tokens_to_ids(t)
+            for t in utility_tokens_names
+        }
 
     return ret_tokens, rel_tokens, grd_tokens, ut_tokens
-
-
-def fix_spacing(input_text):
-    output_text = re.sub(r'(?<=\w)([.!?])(?=\w)', r'\1 ', input_text)
-    return output_text
-
-
-def postprocess(pred):
-    for item in control_tokens:
-        pred = pred.replace(item, "")
-    pred = pred.replace("</s>", "")
-    if len(pred) == 0:
-        return ""
-    if pred[0] == " ":
-        pred = pred[1:]
-    return pred

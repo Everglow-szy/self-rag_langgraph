@@ -271,7 +271,11 @@ class SelfRAGReranking:
 
     Generates per-passage answers internally to compute relevance, grounding,
     and utility scores, then returns passages reordered by those scores.
-    The generated text is discarded; only the ranking is used.
+
+    The generated text and score are cached in
+    ``metadata["_selfrag_pred"]`` so that a downstream
+    ``SelfRAGGeneration`` can reuse them without re-generating.
+    Non-SelfRAG generation components simply ignore the cached data.
     """
 
     model: Any = None
@@ -309,17 +313,18 @@ class SelfRAGReranking:
         )
         preds = self.model.generate(augmented, sp)
 
-        scored: list[tuple[int, float]] = []
+        scored: list[tuple[int, float, str]] = []
         for p_idx, pred in enumerate(preds):
             score = compute_selfrag_score(
                 pred, self.rel_tokens, self.grd_tokens, self.ut_tokens,
                 self.w_rel, self.w_sup, self.w_use, self.use_seqscore,
             )
-            scored.append((p_idx, score))
+            gen_text = _postprocess(pred.outputs[0].text)
+            scored.append((p_idx, score, gen_text))
 
         scored.sort(key=lambda x: x[1], reverse=True)
         reranked = []
-        for p_idx, score in scored[:top_k]:
+        for p_idx, score, gen_text in scored[:top_k]:
             r = results[p_idx]
             reranked.append(
                 RetrievalResult(
@@ -327,7 +332,14 @@ class SelfRAGReranking:
                     content=r.content,
                     score=score,
                     title=r.title,
-                    metadata={**r.metadata, "selfrag_score": score},
+                    metadata={
+                        **r.metadata,
+                        "selfrag_score": score,
+                        "_selfrag_pred": {
+                            "text": gen_text,
+                            "score": score,
+                        },
+                    },
                 )
             )
         return reranked
@@ -340,6 +352,11 @@ class SelfRAGGeneration:
     For each context passage the model generates a candidate answer and scores
     it using Self-RAG's logprob-based relevance/grounding/utility signals.
     The highest-scoring answer is returned as the canonical ``GenerationResult``.
+
+    If the context items carry ``_selfrag_pred`` metadata (cached by
+    ``SelfRAGReranking``), those predictions are reused directly --
+    avoiding redundant LLM calls when both components are in the same
+    pipeline.
     """
 
     model: Any = None
@@ -352,12 +369,46 @@ class SelfRAGGeneration:
     use_seqscore: bool = False
     max_new_tokens: int = 100
 
+    def _try_cached(
+        self, context: list[RetrievalResult],
+    ) -> Optional[GenerationResult]:
+        """Return a result built from cached reranking predictions if available."""
+        cached = [
+            (i, r.metadata["_selfrag_pred"])
+            for i, r in enumerate(context)
+            if isinstance(r.metadata.get("_selfrag_pred"), dict)
+        ]
+        if not cached:
+            return None
+
+        best_idx, best_pred = max(cached, key=lambda x: x[1].get("score", 0.0))
+        best_text = best_pred.get("text", "")
+        if best_text and best_text[0] in ("#", ":"):
+            best_text = best_text[1:]
+
+        citations = [context[best_idx].source_id] if context else []
+        return GenerationResult(
+            output=best_text,
+            citations=citations,
+            metadata={
+                "selfrag_score": best_pred.get("score", 0.0),
+                "passage_index": best_idx,
+                "num_passages_scored": len(cached),
+                "from_reranking_cache": True,
+            },
+        )
+
     def generate(
         self,
         query: str,
         context: list[RetrievalResult],
         instruction: str = "",
     ) -> GenerationResult:
+        if context:
+            cached_result = self._try_cached(context)
+            if cached_result is not None:
+                return cached_result
+
         if self.model is None:
             return GenerationResult(output="", citations=[])
 
@@ -412,6 +463,7 @@ class SelfRAGGeneration:
                 "selfrag_score": best_score,
                 "passage_index": best_idx,
                 "num_passages_scored": len(preds),
+                "from_reranking_cache": False,
             },
         )
 
