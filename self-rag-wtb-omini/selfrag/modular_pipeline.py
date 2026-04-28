@@ -48,3 +48,7 @@ def build_selfrag_modular_graph(
     graph.add_edge("reranking", "generation")
     graph.add_edge("generation", END)
     return graph.compile()
+
+
+# Alias used by wtb_integration.py
+build_selfrag_modular_state_graph = build_selfrag_modular_graph
