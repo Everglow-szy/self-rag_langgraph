@@ -1,4 +1,4 @@
-# self-rag-wtb-eval
+# self-rag-wtb-omini
 
 Self-RAG unified evaluation framework, bridging Self-RAG's vLLM inference with WTB (Workflow Test Bench) and OminiRAG benchmark adapters through the `rag_contracts` protocol layer.
 
@@ -36,7 +36,7 @@ Self-RAG unified evaluation framework, bridging Self-RAG's vLLM inference with W
 ## Project Structure
 
 ```
-self-rag-wtb-eval/
+self-rag-wtb-omini/
 ├── selfrag/
 │   ├── adapters.py              # Bidirectional adapters (Self-RAG <-> rag_contracts)
 │   ├── modular_pipeline.py      # 4-node LangGraph pipeline (query→retrieval→reranking→generation)
